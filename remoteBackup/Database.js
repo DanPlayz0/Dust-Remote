@@ -1,12 +1,10 @@
 const { MongoClient } = require('mongodb');
 
 module.exports = class DatabaseManager {
-  constructor(client) {
-    this.client = client;
+  constructor(mongo_uri) {
+    this.mongo_uri = mongo_uri;
     this.raw = null;
     this.db = null;
-
-    this.mongo_uri = client.config.mongo_uri;
   }
 
   async init() {
@@ -16,6 +14,10 @@ module.exports = class DatabaseManager {
     if(!urlTokens) throw Error('Missing Table Name');
     this.db = this.raw.db(urlTokens && urlTokens[1]);
     return true;
+  }
+
+  close () {
+    this.raw.close();
   }
 
   insertOne(collection, ...args) { return this.db.collection(collection).insertOne(...args); }
