@@ -21,7 +21,7 @@ const fetch = (options) => {
 }
 
 
-const backupServer = async (token, guildId) => {
+const backupServer = async (token, guildId, backupCodeInput) => {
   const guild = await fetch({
     url: `${baseURL}/guilds/${guildId}`,
     method: "GET",
@@ -39,7 +39,7 @@ const backupServer = async (token, guildId) => {
   });
   ctx.database = new (require('./Database'))(require('../config').mongo_uri);
   await ctx.database.init();
-  const backupCode = createCode(21);
+  const backupCode = backupCodeInput ?? createCode(21);
   console.log("Creating backup with code: "+ backupCode);
   await createBackup(ctx, backupCode);
   ctx.database.close();
@@ -102,8 +102,11 @@ const createBackup = async (ctx, backupCode) => {
     remote: true,
   };
 
-  await ctx.database.insertOne('backups', bkObj);
-  await ctx.database.updateOne('backups', { code: backupCode }, { $set: { "discord.roles": ctx.guild.roles } });
+  const findBackup = await ctx.database.findOne('backups', {code: backupCode});
+  if (findBackup) await ctx.database.updateOne('backups', { code: backupCode }, { $set: bkObj });
+  else await ctx.database.insertOne('backups', bkObj);
+  
+  await ctx.database.updateOne('backups', { code: backupCode }, { $set: { "discord.roles": ctx.guild.roles.sort((a,b) => b.position - a.position) } });
   await ctx.database.updateOne('backups', { code: backupCode }, { $set: { "discord.emojis": ctx.guild.emojis } });
   await ctx.database.updateOne('backups', { code: backupCode }, { $set: { "discord.stickers": ctx.guild.stickers } });
   
@@ -146,7 +149,7 @@ const createBackup = async (ctx, backupCode) => {
       
       try {
         const messages = [];
-        for (let i=0;i<100;i++) {
+        for (let i=0;i<5;i++) {
           try {
             const msg = await ctx.dfetch(`channels/${channel.id}/messages?limit=100${messages.length > 0 ? `&before=${messages[messages.length-1].id}` : ''}`)
             messages.push(...msg);
