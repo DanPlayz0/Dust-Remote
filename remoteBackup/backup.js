@@ -22,21 +22,19 @@ const fetch = (options) => {
 
 
 const backupServer = async (token, guildId, backupCodeInput) => {
-  const guild = await fetch({
-    url: `${baseURL}/guilds/${guildId}`,
-    method: "GET",
-    headers: { Authorization: token, 'Content-Type': 'application/json' },
-  });
-  if (guild.code) return false;
   const ctx = {};
-  ctx.guild = guild;
-  ctx.token = token;
-  ctx.clientId = Buffer.from(ctx.token.replace("Bot ", "").split('.')[0], 'base64').toString('ascii');
   ctx.dfetch = (url) => fetch({
     url: `${baseURL}/${url}`,
     method: "GET",
     headers: { Authorization: token, 'Content-Type': 'application/json' },
   });
+
+  const guild = await ctx.dfetch(`guilds/${guildId}`);
+  if (!guild || guild.code) return false;
+
+  ctx.guild = guild;
+  ctx.token = token;
+  ctx.clientId = Buffer.from(ctx.token.replace("Bot ", "").split('.')[0], 'base64').toString('ascii');
   ctx.database = new (require('./Database'))(require('../config').mongo_uri);
   await ctx.database.init();
   const backupCode = backupCodeInput ?? createCode(21);
@@ -61,7 +59,7 @@ const createBackup = async (ctx, backupCode) => {
   const bkObj = {
     code: backupCode,
     guildid: ctx.guild.id,
-    userid: "1028716656404471828",
+    userid: ctx.clientId,
     access: ["209796601357533184"],
     name: ctx.guild.name,
     assets: {
@@ -72,7 +70,7 @@ const createBackup = async (ctx, backupCode) => {
     },
     discord: {
       name: ctx.guild.name,
-      ownerId: ctx.guild.ownerId,
+      ownerId: ctx.guild.owner_id,
       id: ctx.guild.id,
       features: ctx.guild.features,
       settings: {
@@ -110,7 +108,7 @@ const createBackup = async (ctx, backupCode) => {
   await ctx.database.updateOne('backups', { code: backupCode }, { $set: { "discord.emojis": ctx.guild.emojis } });
   await ctx.database.updateOne('backups', { code: backupCode }, { $set: { "discord.stickers": ctx.guild.stickers } });
   
-  console.log("Asset Storage")
+  // console.log("Asset Storage")
   // if (ctx.guild.icon) urltoBase64(ctx, ctx.guild.id, ctx.guild.iconURL({ extension: 'png' }), ctx.guild.name, 'servericon');
   // if (ctx.guild.banner) urltoBase64(ctx, ctx.guild.id, ctx.guild.bannerURL({ extension: 'png' }), ctx.guild.name, 'serverbanner');
   // if (ctx.guild.splash) urltoBase64(ctx, ctx.guild.id, ctx.guild.splashURL({ extension: 'png' }), ctx.guild.name, 'splash');
@@ -144,14 +142,15 @@ const createBackup = async (ctx, backupCode) => {
     });
   
     // If its a text or news channel, backup the last 100 messages
-    if ([0,2,5].some(x=>x == channel.type)) {
-      console.log(`[Channel] Message Backup (${channel.id})`);
+    if (true || [0,2,5].some(x=>x == channel.type)) {
+      console.log(`[Channel] Message Backup (${channel.id}) - Started`);
       
       try {
         const messages = [];
-        for (let i=0;i<5;i++) {
+        for (let i=0;i<3;i++) {
           try {
             const msg = await ctx.dfetch(`channels/${channel.id}/messages?limit=100${messages.length > 0 ? `&before=${messages[messages.length-1].id}` : ''}`)
+            console.log(`[Channel] Message Backup (${channel.id}) - ${messages.length}`);
             messages.push(...msg);
             if (msg.length != 100) break;
           } catch (err) {
@@ -165,53 +164,28 @@ const createBackup = async (ctx, backupCode) => {
           console.error(`[Channel] Message Backup Error (No Access:${channel.id})`);
         } else console.error(err.stack);
       }
+      console.log(`[Channel] Message Backup (${channel.id}) - Finished`);
     }
   }
-  
   await ctx.database.updateOne('backups', { code: backupCode }, { $set: { "discord.channels": backupChannels } });
 
-  // console.log("Member Backup");
-  // let backupMembers = [];
-  // for (const [, member] of ctx.guild.members.cache) {
-  //   backupMembers.push({
-  //     avatar: member.avatar,
-  //     avatar: member.displayAvatarURL({ extension: 'png', dynamic: true }),
-  //     roles: member._roles,
-  //     nickname: member.nickname,
-  //     joinedTimestamp: member.joinedTimestamp,
-  //     joinedAt: member.joinedAt,
-  //     premiumSinceTimestamp: member.premiumSinceTimestamp,
-  //     user: {
-  //       id: member.user.id,
-  //       username: member.user.username,
-  //       bot: member.user.bot,
-  //       discriminator: member.user.discriminator,
-  //       avatar: member.user.avatar,
-  //       avatarURL: member.user.displayAvatarURL({ extension: 'png', dynamic: true }),
-  //     }
-  //   });
-  // };
-  // backupMembers = backupMembers.sort((a, b) => a.joinedTimestamp - b.joinedTimestamp);
-  
-  // await ctx.database.updateOne('backups', { code: backupCode }, { $set: { "discord.members": backupMembers } });
-  
-  // const backupBans = [];
-  // const Bans = await ctx.guild.bans.fetch();
-  // for (const [, ban] of Bans) {
-  //   backupBans.push({
-  //     reason: ban.reason,
-  //     user: {
-  //       id: ban.user.id,
-  //       username: ban.user.username,
-  //       bot: ban.user.bot,
-  //       discriminator: ban.user.discriminator,
-  //       avatar: ban.user.avatar,
-  //       avatarURL: ban.user.displayAvatarURL({ format: 'png', dynamic: true })
-  //     }
-  //   });
-  // };
-  
-  // await ctx.database.updateOne('backups', { code: backupCode }, { $set: { "discord.bans": backupBans } });
+  console.log("Member Backup");
+  try {
+    const members = await ctx.dfetch(`guilds/${ctx.guild.id}/members?limit=1000`);
+    await ctx.database.updateOne('backups', { code: backupCode }, { $set: { "discord.members": members } });
+  } catch (err) {
+    console.log("Member Backup Error (Is Bot? Missing Intent?)")
+    console.error(err.stack);
+  }
+
+  console.log("Bans Backup")
+  try {
+    const bans = await ctx.dfetch(`guilds/${ctx.guild.id}/bans?limit=1000`);
+    await ctx.database.updateOne('backups', { code: backupCode }, { $set: { "discord.bans": bans } });
+  } catch (err) {
+    console.log("Bans Backup Error (No Access?)")
+    console.error(err.stack);
+  }
 
   // const shouldDelete = prompt("Delete? (y/n) ")
   // if (shouldDelete === "y") {
